@@ -1,0 +1,12 @@
+#event_simpleName IN (ProcessRollup2, FileWritten) event_platform=Lin
+(
+  (regex CommandLine="(?i)(timedatectl|hwclock|date\s+--set|ntpdate|chronyd|systemctl\s+.*(ntp|chrony|timesyncd))") OR
+  (regex TargetFileName="(?i)(\/etc\/ntp\.conf|\/etc\/chrony|\/etc\/systemd\/timesyncd\.conf|\/etc\/localtime)")
+)
+| eval EventType=case(
+    #event_simpleName="ProcessRollup2", "Time Command Execution",
+    #event_simpleName="FileWritten", "Time Config Modified",
+    1=1, "Unknown"
+  )
+| table _time, aid, ComputerName, UserName, EventType, CommandLine, TargetFileName
+| sort -_time
