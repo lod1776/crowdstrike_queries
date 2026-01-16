@@ -1,0 +1,92 @@
+// Time/Date Change Detection - Multi-Platform
+// Detects manual time changes, NTP modifications, and timezone changes
+
+// Windows: Time change events
+event_simpleName IN ("UserAccountLogon", "ProcessRollup2", "SyntheticProcessRollup2")
+| where event_platform="Win"
+| where (
+    // Time change via w32tm or timedate.cpl
+    (FileName IN ("w32tm.exe", "timedate.cpl", "control.exe") AND 
+     (CommandLine=/.*time.*/i OR CommandLine=/.*date.*/i OR CommandLine=/.*timezone.*/i))
+    OR
+    // PowerShell time change commands
+    (FileName="powershell.exe" AND 
+     (CommandLine=/.*Set-Date.*/i OR CommandLine=/.*Set-TimeZone.*/i OR 
+      CommandLine=/.*\[System\.DateTime\].*/i OR CommandLine=/.*Win32_OperatingSystem.*LocalDateTime.*/i))
+    OR
+    // Registry modifications for timezone
+    (FileName="reg.exe" AND CommandLine=/.*TimeZoneInformation.*/i)
+    OR
+    // Control panel time settings
+    (FileName="control.exe" AND CommandLine=/.*timedate\.cpl.*/i)
+)
+
+UNION
+
+// Windows: Event logs for time changes (if ingested)
+event_simpleName="EventLogEntry"
+| where event_platform="Win"
+| where EventID IN (4616, 1) // 4616=System time changed, 1=Time service events
+| eval ChangeType=case(
+    EventID=4616, "System Time Changed",
+    EventID=1, "Time Service Event"
+)
+
+UNION
+
+// Linux: Time change commands
+event_simpleName IN ("ProcessRollup2", "SyntheticProcessRollup2")
+| where event_platform="Lin"
+| where (
+    // Direct time manipulation
+    FileName IN ("date", "timedatectl", "hwclock", "ntpdate", "ntpd", "chronyd")
+    OR
+    // NTP configuration changes
+    (FileName IN ("vi", "vim", "nano", "sed", "echo") AND 
+     CommandLine=/.*\/etc\/ntp\.conf.*/i OR CommandLine=/.*\/etc\/chrony.*/i OR 
+     CommandLine=/.*\/etc\/systemd\/timesyncd\.conf.*/i)
+    OR
+    // Timezone changes
+    (CommandLine=/.*\/etc\/localtime.*/i OR CommandLine=/.*\/usr\/share\/zoneinfo.*/i)
+    OR
+    // Systemd timedate services
+    (FileName="systemctl" AND CommandLine=/.*timesyncd.*/i)
+)
+
+UNION
+
+// macOS: Time change commands
+event_simpleName IN ("ProcessRollup2", "SyntheticProcessRollup2")
+| where event_platform="Mac"
+| where (
+    // System date/time commands
+    FileName IN ("date", "systemsetup", "ntpdate", "ntpd", "sntp")
+    OR
+    // System Preferences modifications
+    (FileName="systemsetup" AND 
+     (CommandLine=/.*-setdate.*/i OR CommandLine=/.*-settime.*/i OR 
+      CommandLine=/.*-settimezone.*/i OR CommandLine=/.*-setusingnetworktime.*/i))
+    OR
+    // NTP configuration
+    (CommandLine=/.*\/etc\/ntp\.conf.*/i OR CommandLine=/.*ntpd.*/i)
+    OR
+    // Timezone changes
+    (CommandLine=/.*\/etc\/localtime.*/i OR CommandLine=/.*\/usr\/share\/zoneinfo.*/i)
+)
+
+// Enrichment and filtering
+| eval Platform=case(
+    event_platform="Win", "Windows",
+    event_platform="Lin", "Linux", 
+    event_platform="Mac", "macOS"
+)
+| eval ChangeMethod=case(
+    FileName IN ("w32tm.exe", "timedate.cpl", "date", "timedatectl", "systemsetup"), "Direct Time Change",
+    FileName IN ("ntpdate", "ntpd", "chronyd", "sntp"), "NTP Service",
+    FileName IN ("powershell.exe", "pwsh.exe"), "PowerShell",
+    FileName IN ("reg.exe", "regedit.exe"), "Registry Modification",
+    FileName IN ("vi", "vim", "nano", "sed", "echo"), "Config File Edit",
+    1=1, "Other"
+)
+| table _time, ComputerName, UserName, Platform, FileName, CommandLine, ChangeMethod, ParentProcessId, SHA256HashData
+| sort -_time
