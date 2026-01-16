@@ -1,0 +1,13 @@
+event_simpleName=ProcessRollup2
+| search (FileName IN ("w32tm.exe", "tzutil.exe", "timedate.cpl", "control.exe") OR
+         CommandLine IN ("*Set-Date*", "*Set-TimeZone*", "*w32tm*", "*tzutil*", "*timedate.cpl*"))
+| where match(CommandLine, "(?i)(\/set|\/tz|/s|setdatetime|settimezone|set-date)")
+| eval TimeChangeMethod=case(
+    match(FileName, "(?i)w32tm"), "W32Time Utility",
+    match(FileName, "(?i)tzutil"), "Timezone Utility",
+    match(CommandLine, "(?i)Set-Date"), "PowerShell Set-Date",
+    match(CommandLine, "(?i)Set-TimeZone"), "PowerShell Set-TimeZone",
+    match(FileName, "(?i)timedate"), "Control Panel Time/Date",
+    1=1, "Other Time Change Method"
+)
+| table _time, ComputerName, UserName, FileName, CommandLine, TimeChangeMethod, ParentProcessId
