@@ -1,0 +1,56 @@
+// Multi-platform IAM event detection
+(
+    // Windows native events
+    #event_simpleName=in(values=["UserAccountCreated", "UserAccountDeleted", "UserAccountModified", "UserAccountAddedToGroup", "UserAccountRemovedFromGroup"])
+) OR (
+    // Linux user management processes
+    event_platform=Lin #event_simpleName=ProcessRollup2
+    | in(field="FileName", values=["useradd", "usermod", "userdel", "passwd", "groupadd", "groupmod", "groupdel", "gpasswd"], ignoreCase=true)
+) OR (
+    // macOS user management processes
+    event_platform=Mac #event_simpleName=ProcessRollup2
+    | in(field="FileName", values=["dscl", "sysadminctl", "passwd", "dseditgroup"], ignoreCase=true)
+)
+
+// Convert timestamps
+| ContextTimeStamp:=ContextTimeStamp*1000
+| ContextTimeStamp_Readable:=formatTime(format="%F %T %Z", field="ContextTimeStamp")
+
+// Platform-specific categorization
+| case {
+    // Windows events
+    #event_simpleName=UserAccountCreated | EventCategory:="Account Created" | Source:="Windows Native Event";
+    #event_simpleName=UserAccountDeleted | EventCategory:="Account Deleted" | Source:="Windows Native Event";
+    #event_simpleName=UserAccountModified | EventCategory:="Account Modified" | Source:="Windows Native Event";
+    #event_simpleName=UserAccountAddedToGroup | EventCategory:="Privilege Elevated" | Source:="Windows Native Event";
+    #event_simpleName=UserAccountRemovedFromGroup | EventCategory:="Privilege Reduced" | Source:="Windows Native Event";
+    
+    // Linux events
+    event_platform=Lin AND FileName=/useradd/i | EventCategory:="Account Created" | Source:="Linux Command";
+    event_platform=Lin AND FileName=/usermod/i | EventCategory:="Account Modified" | Source:="Linux Command";
+    event_platform=Lin AND FileName=/userdel/i | EventCategory:="Account Deleted" | Source:="Linux Command";
+    event_platform=Lin AND FileName=/gpasswd/i | EventCategory:="Group Membership Changed" | Source:="Linux Command";
+    
+    // macOS events
+    event_platform=Mac AND CommandLine=/create.*user/i | EventCategory:="Account Created" | Source:="macOS Command";
+    event_platform=Mac AND CommandLine=/delete.*user/i | EventCategory:="Account Deleted" | Source:="macOS Command";
+    
+    // Default
+    * | EventCategory:="IAM Activity" | Source:="Unknown";
+}
+
+// Output
+| table([
+    ComputerName,
+    ContextTimeStamp_Readable,
+    event_platform,
+    EventCategory,
+    Source,
+    UserName,
+    #event_simpleName,
+    FileName,
+    CommandLine,
+    aid
+])
+
+| sort(field="@timestamp", reverse=true, limit=10000)
