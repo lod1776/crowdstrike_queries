@@ -1,0 +1,30 @@
+// Windows File Access to Cardholder Data Locations
+#event_simpleName=ProcessRollup2 
+FileName in(values=["*.exe", "*.dll", "*.bat", "*.ps1", "*.vbs"])
+| search(TargetFileName, pattern="(?i)(cardholder|chd|payment|credit|card|pan|\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4})")
+| UserName!="-" AND UserName!="SYSTEM" AND UserName!="LOCAL SERVICE" AND UserName!="NETWORK SERVICE"
+
+// Windows File Access Events to CHD Storage Paths
+#event_simpleName=AsepValueUpdate 
+| search(RegistryPath, pattern="(?i)(cardholder|chd|payment|card_data)")
+| UserName!="-" AND UserName!="SYSTEM"
+
+// Windows Object Access - File System
+#event_simpleName in(values=[FileOpenInfo, FileWritten, FileDeleted, FileCreated])
+| search(TargetFileName, pattern="(?i)(\\\\cardholder\\\\|\\\\chd\\\\|\\\\payment_data\\\\|card.*data|\\d{13,19})")
+| UserName!="-" AND UserName!="SYSTEM" AND UserName!="LOCAL SERVICE" AND UserName!="NETWORK SERVICE"
+
+// Windows Share Access to CHD Locations
+#event_simpleName=NetworkShareAccessedV2
+| search(ShareName, pattern="(?i)(cardholder|chd|payment|card)")
+| UserName!="-" AND UserName!="SYSTEM"
+
+// Windows Database Access (SQL Server) to CHD
+#event_simpleName=ProcessRollup2
+| search(CommandLine, pattern="(?i)(SELECT.*FROM.*(cardholder|payment|card_data)|INSERT.*INTO.*(cardholder|payment|card_data)|UPDATE.*(cardholder|payment|card_data))")
+| UserName!="-" AND UserName!="SYSTEM"
+
+// Windows Registry Access to Sensitive Keys
+#event_simpleName=RegKeySecurityApplied
+| search(RegObjectName, pattern="(?i)(payment|cardholder|chd|card_data)")
+| UserName!="-" AND UserName!="SYSTEM"
