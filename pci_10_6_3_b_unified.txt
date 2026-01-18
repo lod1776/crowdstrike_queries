@@ -1,0 +1,60 @@
+// PCI DSS 10.6.3.b - Unified Time Synchronization Changes Detection
+// Detects modifications to time settings and time synchronization configurations
+// Covers Windows and Linux platforms
+
+#event_simpleName=*
+in(event_platform, values=["Win", "Lin"])
+| where (
+    // Windows: W32Time commands
+    (event_platform="Win" AND event_simpleName="ProcessRollup2" AND ImageFileName=/i(w32tm.exe)) OR
+    
+    // Windows: Time Service Registry
+    (event_platform="Win" AND event_simpleName="AsepValueUpdate" AND RegObjectName=/i(\\CurrentControlSet\\Services\\W32Time)) OR
+    
+    // Windows: Timezone Registry  
+    (event_platform="Win" AND event_simpleName="AsepValueUpdate" AND RegObjectName=/i(\\Control\\TimeZoneInformation)) OR
+    
+    // Windows: System Time Change Event
+    (event_platform="Win" AND event_simpleName="SystemTimeChange") OR
+    
+    // Windows: NTP Registry Settings
+    (event_platform="Win" AND event_simpleName="RegGenericValue" AND RegObjectName=/i(NtpServer|Type|MaxPosPhaseCorrection|MaxNegPhaseCorrection)) OR
+    
+    // Linux: timedatectl
+    (event_platform="Lin" AND event_simpleName="ProcessRollup2" AND ImageFileName=/i(timedatectl) AND CommandLine=/i(set-time|set-timezone|set-ntp|set-local-rtc)) OR
+    
+    // Linux: date/hwclock
+    (event_platform="Lin" AND event_simpleName="ProcessRollup2" AND ImageFileName=/i(date|hwclock) AND CommandLine=/i(--set|--hctosys|--systohc)) OR
+    
+    // Linux: NTP/Chrony config files
+    (event_platform="Lin" AND in(event_simpleName, values=["FileWritten", "FileModified"]) AND TargetFilename=/i(/etc/ntp.conf|/etc/chrony)) OR
+    
+    // Linux: systemd-timesyncd config
+    (event_platform="Lin" AND in(event_simpleName, values=["FileWritten", "FileModified"]) AND TargetFilename=/i(/etc/systemd/timesyncd.conf)) OR
+    
+    // Linux: systemctl time service control
+    (event_platform="Lin" AND event_simpleName="ProcessRollup2" AND ImageFileName=/i(systemctl) AND CommandLine=/i(systemd-timesyncd|ntpd|chronyd) AND CommandLine=/i(start|stop|enable|disable|restart)) OR
+    
+    // Linux: Timezone files
+    (event_platform="Lin" AND in(event_simpleName, values=["FileWritten", "FileModified"]) AND TargetFilename=/i(/etc/timezone|/etc/localtime))
+)
+| eval RuleID="PCI_10.6.3.b_Time_Sync_Changes"
+| eval Severity=case(
+    event_simpleName="SystemTimeChange", "CRITICAL",
+    ImageFileName=/i(w32tm.exe|timedatectl|date|hwclock), "HIGH",
+    TargetFilename=/i(/etc/ntp.conf|/etc/chrony|timesyncd.conf), "HIGH",
+    RegObjectName=/i(W32Time), "HIGH",
+    1=1, "MEDIUM"
+)
+| eval ComplianceRequirement="PCI DSS 10.6.3.b"
+| eval Description=case(
+    event_platform="Win" AND event_simpleName="SystemTimeChange", "Windows system time manually changed",
+    event_platform="Win" AND ImageFileName=/i(w32tm.exe), "Windows time command executed",
+    event_platform="Win" AND RegObjectName=/i(W32Time), "Windows Time Service configuration modified",
+    event_platform="Lin" AND ImageFileName=/i(timedatectl), "Linux timedatectl time modification",
+    event_platform="Lin" AND ImageFileName=/i(date|hwclock), "Linux manual time change command",
+    event_platform="Lin" AND TargetFilename=/i(ntp.conf|chrony), "Linux NTP/Chrony config modified",
+    event_platform="Lin" AND ImageFileName=/i(systemctl), "Linux time sync service state changed",
+    1=1, "Time synchronization setting modified"
+)
+| table _time, event_platform, aid, ComputerName, UserName, event_simpleName, ImageFileName, CommandLine, RegObjectName, RegValueName, TargetFilename, RuleID, Severity, ComplianceRequirement, Description
