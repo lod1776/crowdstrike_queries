@@ -1,0 +1,22 @@
+// PCI DSS 10.2.1.6 - Audit log activity monitoring
+// Detects initialization of new logs, starting, stopping, or pausing of existing logs
+
+// Linux audit events related to auditd service
+(event_platform=Lin AND (#event_simpleName=AuditdServiceStopped OR #event_simpleName=AuditdServiceStarted))
+OR
+// Windows audit policy changes
+(event_platform=Win AND #event_simpleName=AuditPolicyModified)
+OR  
+// Syslog/logging daemon changes on Linux
+(event_platform=Lin AND (#event_simpleName=ProcessRollup2 OR #event_simpleName=SyntheticProcessRollup2) 
+  AND (ImageFileName IN (values=["*rsyslogd", "*syslog-ng", "*systemd-journald", "*auditd"]) 
+  OR CommandLine="*auditctl*"))
+OR
+// Windows event log service changes
+(event_platform=Win AND (#event_simpleName=ServiceStarted OR #event_simpleName=ServiceStopped) 
+  AND (ServiceName="EventLog" OR ServiceImageFileName="*wevtsvc.dll"))
+OR
+// CrowdStrike sensor logging changes
+(#event_simpleName IN (values=["SensorHeartbeat", "AgentOnline", "AgentOffline"]))
+
+| table([@timestamp, ComputerName, event_platform, #event_simpleName, UserName, CommandLine, ServiceName, aid])
