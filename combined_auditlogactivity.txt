@@ -1,24 +1,13 @@
-// PCI DSS 10.2.1.6 - Audit log activity monitoring
-// Detects initialization of new logs, starting, stopping, or pausing of existing logs
-
 (
-// Windows Event Log service changes
-event_platform=Win #event_simpleName=ServiceStarted ServiceName="EventLog"
-OR event_platform=Win #event_simpleName=ServiceStopped ServiceName="EventLog"
-
-// Windows audit policy modifications
-OR event_platform=Win #event_simpleName=AuditPolicyModified
-
-// Linux auditd service events
-OR event_platform=Lin #event_simpleName=AuditdServiceStarted
-OR event_platform=Lin #event_simpleName=AuditdServiceStopped
-
-// Linux logging daemon process events (rsyslog, syslog-ng, journald, auditd)
-OR event_platform=Lin #event_simpleName=ProcessRollup2 ImageFileName=*rsyslogd
-OR event_platform=Lin #event_simpleName=ProcessRollup2 ImageFileName=*syslog-ng
-OR event_platform=Lin #event_simpleName=ProcessRollup2 ImageFileName=*systemd-journald
-OR event_platform=Lin #event_simpleName=ProcessRollup2 ImageFileName=*auditd
-OR event_platform=Lin #event_simpleName=ProcessRollup2 CommandLine=*auditctl*
+  (event_platform=Win #event_simpleName=ServiceStarted ServiceDisplayName="EventLog")
+  OR (event_platform=Win #event_simpleName=ServiceStopped ServiceDisplayName="EventLog")
+  OR (event_platform=Win #event_simpleName=AuditPolicyModified)
+  OR (event_platform=Lin #event_simpleName=AuditdServiceStarted)
+  OR (event_platform=Lin #event_simpleName=AuditdServiceStopped)
+  OR (event_platform=Lin #event_simpleName=ProcessRollup2 ImageFileName=*rsyslogd)
+  OR (event_platform=Lin #event_simpleName=ProcessRollup2 ImageFileName=*syslog-ng)
+  OR (event_platform=Lin #event_simpleName=ProcessRollup2 ImageFileName=*systemd-journald)
+  OR (event_platform=Lin #event_simpleName=ProcessRollup2 ImageFileName=*auditd)
+  OR (event_platform=Lin #event_simpleName=ProcessRollup2 CommandLine=*auditctl*)
 )
-
-| table([@timestamp, ComputerName, event_platform, #event_simpleName, UserName, CommandLine, ServiceName, ImageFileName, aid])
+| table([@timestamp, ComputerName, event_platform, #event_simpleName, UserName, CommandLine, ServiceDisplayName, ImageFileName, aid])
