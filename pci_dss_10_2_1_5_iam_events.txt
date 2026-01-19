@@ -1,0 +1,279 @@
+# PCI DSS Requirement 10.2.1.5 - IAM Events on Local Hosts
+# Detection Rule for User Account and Privilege Changes
+
+## Rule Description
+This NGSIEM rule detects changes to identification and authentication credentials on local hosts
+to satisfy PCI DSS Requirement 10.2.1.5, which requires logging:
+- Creation of new user accounts
+- Elevation of privileges for existing accounts
+- Any modifications, additions, or deletions to accounts with administrative access
+
+## Platforms Covered
+- Windows
+- Linux
+- macOS
+
+## NGSIEM Query
+
+```
+// Detect user account creation, modification, deletion, and privilege elevation
+in(#event_simpleName, values=["UserAccountCreated", "UserAccountDeleted", "UserAccountModified", "UserAccountAddedToGroup", "UserAccountRemovedFromGroup"])
+
+// Parse and enrich group RID for privilege context
+| case {
+    #event_simpleName=UserAccountAddedToGroup OR #event_simpleName=UserAccountRemovedFromGroup 
+    | parseInt(GroupRid, as="GroupRid_Parsed", radix="16", endian="big")
+    | parseInt(UserRid, as="UserRid_Parsed", radix="16", endian="big")
+    | UserSid:=format(format="%s-%s", field=[DomainSid, UserRid_Parsed]);
+    *;
+}
+
+// Convert timestamps for human readability
+| ContextTimeStamp:=ContextTimeStamp*1000
+| ContextTimeStamp_Readable:=formatTime(format="%F %T %Z", field="ContextTimeStamp")
+
+// Categorize administrative privilege changes
+| case {
+    #event_simpleName=UserAccountAddedToGroup 
+    | GroupRid_Parsed=544 | AdminChange:="Added to Administrators";
+    #event_simpleName=UserAccountAddedToGroup 
+    | GroupRid_Parsed=548 | AdminChange:="Added to Account Operators";
+    #event_simpleName=UserAccountAddedToGroup 
+    | GroupRid_Parsed=549 | AdminChange:="Added to Server Operators";
+    #event_simpleName=UserAccountAddedToGroup 
+    | GroupRid_Parsed=550 | AdminChange:="Added to Print Operators";
+    #event_simpleName=UserAccountAddedToGroup 
+    | GroupRid_Parsed=551 | AdminChange:="Added to Backup Operators";
+    #event_simpleName=UserAccountRemovedFromGroup 
+    | GroupRid_Parsed=544 | AdminChange:="Removed from Administrators";
+    #event_simpleName=UserAccountCreated 
+    | AdminChange:="User Account Created";
+    #event_simpleName=UserAccountDeleted 
+    | AdminChange:="User Account Deleted";
+    #event_simpleName=UserAccountModified 
+    | AdminChange:="User Account Modified";
+    * 
+    | AdminChange:="Group Membership Change";
+}
+
+// Aggregate and present results
+| groupBy([aid, ComputerName, UserName, #event_simpleName, AdminChange], function=([
+    selectFromMin(field="@timestamp", include=[
+        ContextTimeStamp_Readable,
+        UserSid,
+        DomainSid,
+        GroupRid_Parsed,
+        RpcClientProcessId,
+        event_platform
+    ])
+]))
+
+// Final output table
+| table([
+    ComputerName,
+    ContextTimeStamp_Readable,
+    #event_simpleName,
+    AdminChange,
+    UserName,
+    UserSid,
+    event_platform,
+    aid
+])
+
+// Sort by most recent first
+| sort(field="@timestamp", reverse=true, limit=10000)
+```
+
+## Linux-Specific Variant
+
+For Linux systems specifically, you may want to monitor process execution events related to user management:
+
+```
+// Linux user management command detection
+event_platform=Lin #event_simpleName=ProcessRollup2
+| in(field="FileName", values=["useradd", "usermod", "userdel", "passwd", "groupadd", "groupmod", "groupdel", "gpasswd", "vigr", "vipw"], ignoreCase=true)
+
+// Convert timestamp
+| ContextTimeStamp:=ContextTimeStamp*1000
+| ContextTimeStamp_Readable:=formatTime(format="%F %T %Z", field="ContextTimeStamp")
+
+// Categorize action type
+| case {
+    FileName=/useradd/i | ActionType:="User Account Created";
+    FileName=/usermod/i | ActionType:="User Account Modified";
+    FileName=/userdel/i | ActionType:="User Account Deleted";
+    FileName=/passwd/i | ActionType:="Password Changed";
+    FileName=/groupadd/i | ActionType:="Group Created";
+    FileName=/groupmod/i | ActionType:="Group Modified";
+    FileName=/groupdel/i | ActionType:="Group Deleted";
+    FileName=/gpasswd/i | ActionType:="Group Membership Modified";
+    FileName=/(vigr|vipw)/i | ActionType:="Manual Group/Password File Edit";
+    * | ActionType:="User Management Activity";
+}
+
+// Extract user/group from command line
+| regex("(?:useradd|usermod|userdel|groupadd|groupmod|groupdel|passwd|gpasswd)\\s+(?:-[\\w\\s]+)*\\s+([\\w-]+)", field=CommandLine, as=TargetUser)
+
+// Output table
+| table([
+    ComputerName,
+    ContextTimeStamp_Readable,
+    ActionType,
+    FileName,
+    CommandLine,
+    TargetUser,
+    UserName,
+    aid
+])
+
+| sort(field="@timestamp", reverse=true, limit=10000)
+```
+
+## macOS-Specific Variant
+
+For macOS systems:
+
+```
+// macOS user management command detection
+event_platform=Mac #event_simpleName=ProcessRollup2
+| in(field="FileName", values=["dscl", "sysadminctl", "passwd", "dseditgroup"], ignoreCase=true)
+
+// Convert timestamp
+| ContextTimeStamp:=ContextTimeStamp*1000
+| ContextTimeStamp_Readable:=formatTime(format="%F %T %Z", field="ContextTimeStamp")
+
+// Categorize action type
+| case {
+    CommandLine=/create.*user/i | ActionType:="User Account Created";
+    CommandLine=/delete.*user/i | ActionType:="User Account Deleted";
+    CommandLine=/passwd.*user/i | ActionType:="User Account Modified";
+    CommandLine=/append.*group/i | ActionType:="Added to Group";
+    CommandLine=/delete.*group/i | ActionType:="Removed from Group";
+    FileName=/sysadminctl/i AND CommandLine=/addUser/i | ActionType:="User Account Created (sysadminctl)";
+    FileName=/sysadminctl/i AND CommandLine=/deleteUser/i | ActionType:="User Account Deleted (sysadminctl)";
+    * | ActionType:="User Management Activity";
+}
+
+// Output table
+| table([
+    ComputerName,
+    ContextTimeStamp_Readable,
+    ActionType,
+    FileName,
+    CommandLine,
+    UserName,
+    aid
+])
+
+| sort(field="@timestamp", reverse=true, limit=10000)
+```
+
+## Combined Multi-Platform Query
+
+For monitoring all platforms simultaneously:
+
+```
+// Multi-platform IAM event detection
+(
+    // Windows native events
+    in(#event_simpleName, values=["UserAccountCreated", "UserAccountDeleted", "UserAccountModified", "UserAccountAddedToGroup", "UserAccountRemovedFromGroup"])
+) OR (
+    // Linux user management processes
+    event_platform=Lin #event_simpleName=ProcessRollup2
+    | in(field="FileName", values=["useradd", "usermod", "userdel", "passwd", "groupadd", "groupmod", "groupdel", "gpasswd"], ignoreCase=true)
+) OR (
+    // macOS user management processes
+    event_platform=Mac #event_simpleName=ProcessRollup2
+    | in(field="FileName", values=["dscl", "sysadminctl", "passwd", "dseditgroup"], ignoreCase=true)
+)
+
+// Convert timestamps
+| ContextTimeStamp:=ContextTimeStamp*1000
+| ContextTimeStamp_Readable:=formatTime(format="%F %T %Z", field="ContextTimeStamp")
+
+// Platform-specific categorization
+| case {
+    // Windows events
+    #event_simpleName=UserAccountCreated | EventCategory:="Account Created" | Source:="Windows Native Event";
+    #event_simpleName=UserAccountDeleted | EventCategory:="Account Deleted" | Source:="Windows Native Event";
+    #event_simpleName=UserAccountModified | EventCategory:="Account Modified" | Source:="Windows Native Event";
+    #event_simpleName=UserAccountAddedToGroup | EventCategory:="Privilege Elevated" | Source:="Windows Native Event";
+    #event_simpleName=UserAccountRemovedFromGroup | EventCategory:="Privilege Reduced" | Source:="Windows Native Event";
+    
+    // Linux events
+    event_platform=Lin AND FileName=/useradd/i | EventCategory:="Account Created" | Source:="Linux Command";
+    event_platform=Lin AND FileName=/usermod/i | EventCategory:="Account Modified" | Source:="Linux Command";
+    event_platform=Lin AND FileName=/userdel/i | EventCategory:="Account Deleted" | Source:="Linux Command";
+    event_platform=Lin AND FileName=/gpasswd/i | EventCategory:="Group Membership Changed" | Source:="Linux Command";
+    
+    // macOS events
+    event_platform=Mac AND CommandLine=/create.*user/i | EventCategory:="Account Created" | Source:="macOS Command";
+    event_platform=Mac AND CommandLine=/delete.*user/i | EventCategory:="Account Deleted" | Source:="macOS Command";
+    
+    // Default
+    * | EventCategory:="IAM Activity" | Source:="Unknown";
+}
+
+// Output
+| table([
+    ComputerName,
+    ContextTimeStamp_Readable,
+    event_platform,
+    EventCategory,
+    Source,
+    UserName,
+    #event_simpleName,
+    FileName,
+    CommandLine,
+    aid
+])
+
+| sort(field="@timestamp", reverse=true, limit=10000)
+```
+
+## Alert Configuration Recommendations
+
+### High Priority Alerts
+- Any `UserAccountAddedToGroup` events where `GroupRid_Parsed = 544` (Administrators)
+- User account creation on production systems
+- User account modifications outside of business hours
+- Multiple rapid account changes from single source
+
+### Retention Requirements
+Per PCI DSS:
+- Store logs for at least 12 months
+- Keep most recent 3 months readily available for analysis
+- Implement tamper-proof storage
+
+## Field Descriptions
+
+| Field | Description |
+|-------|-------------|
+| `event_simpleName` | Type of account event (Created, Deleted, Modified, Group change) |
+| `UserName` | Username affected by the change |
+| `UserSid` | Security Identifier of the user (Windows) |
+| `GroupRid_Parsed` | Relative Identifier of the group (544=Administrators) |
+| `RpcClientProcessId` | Process ID that initiated the change |
+| `ComputerName` | Hostname where the event occurred |
+| `ContextTimeStamp_Readable` | Human-readable timestamp of the event |
+| `event_platform` | Operating system (Win, Lin, Mac) |
+
+## Testing the Rule
+
+Test with known IAM events:
+1. Create a test user account
+2. Modify user privileges
+3. Add user to administrative group
+4. Delete user account
+
+Verify all events are captured with complete details.
+
+## Compliance Mapping
+
+**PCI DSS v4.0 Requirement 10.2.1.5:**
+✅ Creation of new user accounts (UserAccountCreated)
+✅ Elevation of privileges (UserAccountAddedToGroup with admin groups)
+✅ Modifications to accounts (UserAccountModified)
+✅ Additions to privileged accounts (UserAccountAddedToGroup)
+✅ Deletions from privileged accounts (UserAccountRemovedFromGroup, UserAccountDeleted)
+
