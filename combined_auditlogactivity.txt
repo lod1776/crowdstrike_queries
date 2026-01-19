@@ -2,19 +2,19 @@
 // Detects initialization of new logs, starting, stopping, or pausing of existing logs
 
 // Linux audit events related to auditd service
-(event_platform=Lin AND (#event_simpleName=AuditdServiceStopped OR #event_simpleName=AuditdServiceStarted))
+(event_platform=Lin (#event_simpleName=AuditdServiceStopped OR #event_simpleName=AuditdServiceStarted))
 OR
 // Windows audit policy changes
-(event_platform=Win AND #event_simpleName=AuditPolicyModified)
+(event_platform=Win #event_simpleName=AuditPolicyModified)
 OR  
 // Syslog/logging daemon changes on Linux
-(event_platform=Lin AND (#event_simpleName=ProcessRollup2 OR #event_simpleName=SyntheticProcessRollup2) 
-  AND (ImageFileName IN (values=["*rsyslogd", "*syslog-ng", "*systemd-journald", "*auditd"]) 
+(event_platform=Lin (#event_simpleName=ProcessRollup2 OR #event_simpleName=SyntheticProcessRollup2) 
+  (ImageFileName IN (values=["*rsyslogd", "*syslog-ng", "*systemd-journald", "*auditd"]) 
   OR CommandLine="*auditctl*"))
 OR
 // Windows event log service changes
-(event_platform=Win AND (#event_simpleName=ServiceStarted OR #event_simpleName=ServiceStopped) 
-  AND (ServiceName="EventLog" OR ServiceImageFileName="*wevtsvc.dll"))
+(event_platform=Win (#event_simpleName=ServiceStarted OR #event_simpleName=ServiceStopped) 
+  (ServiceName="EventLog" OR ServiceImageFileName="*wevtsvc.dll"))
 OR
 // CrowdStrike sensor logging changes
 (#event_simpleName IN (values=["SensorHeartbeat", "AgentOnline", "AgentOffline"]))
