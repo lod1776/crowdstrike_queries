@@ -1,0 +1,45 @@
+// PCI DSS 10.6.3.b - Unified Time Synchronization Changes Detection
+// Detects modifications to time settings and time synchronization configurations
+// Covers Windows and Linux platforms
+
+#event_simpleName=*
+| in(event_platform, values=["Win", "Lin"])
+| where (
+    // Windows: W32Time commands
+    (event_platform="Win" AND event_simpleName="ProcessRollup2" AND ImageFileName=*\\w32tm.exe) OR
+    
+    // Windows: Time Service Registry
+    (event_platform="Win" AND event_simpleName="AsepValueUpdate" AND RegObjectName=*\\CurrentControlSet\\Services\\W32Time*) OR
+    
+    // Windows: Timezone Registry  
+    (event_platform="Win" AND event_simpleName="AsepValueUpdate" AND RegObjectName=*\\Control\\TimeZoneInformation*) OR
+    
+    // Windows: System Time Change Event
+    (event_platform="Win" AND event_simpleName="SystemTimeChange") OR
+    
+    // Windows: NTP Registry Settings
+    (event_platform="Win" AND event_simpleName="RegGenericValue" AND (RegObjectName=*NtpServer* OR RegObjectName=*MaxPosPhaseCorrection* OR RegObjectName=*MaxNegPhaseCorrection*)) OR
+    
+    // Linux: timedatectl
+    (event_platform="Lin" AND event_simpleName="ProcessRollup2" AND ImageFileName=*timedatectl AND (CommandLine=*set-time* OR CommandLine=*set-timezone* OR CommandLine=*set-ntp* OR CommandLine=*set-local-rtc*)) OR
+    
+    // Linux: date/hwclock
+    (event_platform="Lin" AND event_simpleName="ProcessRollup2" AND (ImageFileName=*/date OR ImageFileName=*/hwclock) AND (CommandLine=*--set* OR CommandLine=*--hctosys* OR CommandLine=*--systohc* OR CommandLine=*-s*)) OR
+    
+    // Linux: NTP/Chrony config files
+    (event_platform="Lin" AND (event_simpleName="FileWritten" OR event_simpleName="FileModified") AND (TargetFilename=*/etc/ntp.conf OR TargetFilename=*/etc/chrony*)) OR
+    
+    // Linux: systemd-timesyncd config
+    (event_platform="Lin" AND (event_simpleName="FileWritten" OR event_simpleName="FileModified") AND TargetFilename=*/etc/systemd/timesyncd.conf) OR
+    
+    // Linux: systemctl time service control
+    (event_platform="Lin" AND event_simpleName="ProcessRollup2" AND ImageFileName=*systemctl AND (CommandLine=*systemd-timesyncd* OR CommandLine=*ntpd* OR CommandLine=*chronyd*) AND (CommandLine=*start* OR CommandLine=*stop* OR CommandLine=*enable* OR CommandLine=*disable* OR CommandLine=*restart*)) OR
+    
+    // Linux: Timezone files
+    (event_platform="Lin" AND (event_simpleName="FileWritten" OR event_simpleName="FileModified") AND (TargetFilename=*/etc/timezone OR TargetFilename=*/etc/localtime))
+)
+| eval RuleID="PCI_10.6.3.b_Time_Sync_Changes"
+| eval ComplianceRequirement="PCI DSS 10.6.3.b"
+| eval Severity=if(event_simpleName="SystemTimeChange", "CRITICAL", "HIGH")
+| eval Description="Time synchronization setting or data modified"
+| table _time, event_platform, aid, ComputerName, UserName, event_simpleName, ImageFileName, CommandLine, RegObjectName, RegValueName, TargetFilename, RuleID, Severity, ComplianceRequirement, Description
