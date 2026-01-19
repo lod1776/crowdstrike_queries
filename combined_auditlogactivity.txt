@@ -17,6 +17,6 @@ OR
   (ServiceName="EventLog" OR ServiceImageFileName="*wevtsvc.dll"))
 OR
 // CrowdStrike sensor logging changes
-(#event_simpleName IN (values=["SensorHeartbeat", "AgentOnline", "AgentOffline"]))
+#event_simpleName IN (values=["SensorHeartbeat", "AgentOnline", "AgentOffline"])
 
 | table([@timestamp, ComputerName, event_platform, #event_simpleName, UserName, CommandLine, ServiceName, aid])
