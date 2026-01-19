@@ -1,0 +1,82 @@
+// PCI DSS 10.6.3.b - Time Synchronization Changes Detection
+// Detects modifications to time settings and time synchronization configurations
+
+// Windows Time Changes - Manual time setting commands
+#event_simpleName=ProcessRollup2 event_platform=Win ImageFileName=*\\w32tm.exe
+| eval RuleID="PCI_10.6.3.b_Win_W32Time"
+| eval Severity="HIGH"
+| eval Platform="Windows"
+| eval Description="Windows time command execution detected"
+| table _time, aid, ComputerName, UserName, ImageFileName, CommandLine, RuleID, Severity, Description
+
+// Windows - Time Service Registry Changes
+#event_simpleName=AsepValueUpdate event_platform=Win RegObjectName=*\\CurrentControlSet\\Services\\W32Time*
+| eval RuleID="PCI_10.6.3.b_Win_Registry_W32Time"
+| eval Severity="HIGH"  
+| eval Platform="Windows"
+| eval Description="Windows Time Service registry modification detected"
+| table _time, aid, ComputerName, UserName, RegObjectName, RegValueName, RegStringValue, RuleID, Severity, Description
+
+// Windows - Time Zone Configuration Changes
+#event_simpleName=AsepValueUpdate event_platform=Win RegObjectName=*\\Control\\TimeZoneInformation*
+| eval RuleID="PCI_10.6.3.b_Win_Timezone"
+| eval Severity="MEDIUM"
+| eval Platform="Windows"
+| eval Description="Windows timezone configuration change detected"
+| table _time, aid, ComputerName, UserName, RegObjectName, RegValueName, RuleID, Severity, Description
+
+// Windows - System Time Change Events
+#event_simpleName=SystemTimeChange event_platform=Win
+| eval RuleID="PCI_10.6.3.b_Win_TimeChange"
+| eval Severity="HIGH"
+| eval Platform="Windows"
+| eval Description="Windows system time manually changed"
+| table _time, aid, ComputerName, UserName, RuleID, Severity, Description
+
+// Linux - timedatectl command execution
+#event_simpleName=ProcessRollup2 event_platform=Lin ImageFileName=*timedatectl CommandLine=/i(set-time|set-timezone|set-ntp|set-local-rtc)
+| eval RuleID="PCI_10.6.3.b_Lin_Timedatectl"
+| eval Severity="HIGH"
+| eval Platform="Linux"
+| eval Description="Linux timedatectl time modification command executed"
+| table _time, aid, ComputerName, UserName, ImageFileName, CommandLine, RuleID, Severity, Description
+
+// Linux - date/hwclock command execution
+#event_simpleName=ProcessRollup2 event_platform=Lin (ImageFileName=*/date OR ImageFileName=*/hwclock) CommandLine=/i(--set|--hctosys|--systohc|-s)
+| eval RuleID="PCI_10.6.3.b_Lin_Manual_Time"
+| eval Severity="HIGH"
+| eval Platform="Linux"
+| eval Description="Linux manual time change command executed"
+| table _time, aid, ComputerName, UserName, ImageFileName, CommandLine, RuleID, Severity, Description
+
+// Linux - NTP configuration file changes
+#event_simpleName in(event_simpleName, values=["FileWritten", "FileModified"]) event_platform=Lin (TargetFilename=*/etc/ntp.conf OR TargetFilename=*/etc/chrony*)
+| eval RuleID="PCI_10.6.3.b_Lin_NTP_Config"
+| eval Severity="HIGH"
+| eval Platform="Linux"
+| eval Description="Linux NTP/Chrony configuration file modified"
+| table _time, aid, ComputerName, UserName, event_simpleName, TargetFilename, RuleID, Severity, Description
+
+// Linux - systemd-timesyncd configuration changes
+#event_simpleName in(event_simpleName, values=["FileWritten", "FileModified"]) event_platform=Lin TargetFilename=*/etc/systemd/timesyncd.conf
+| eval RuleID="PCI_10.6.3.b_Lin_Systemd_Config"
+| eval Severity="HIGH"
+| eval Platform="Linux"
+| eval Description="Linux systemd-timesyncd configuration modified"
+| table _time, aid, ComputerName, UserName, event_simpleName, TargetFilename, RuleID, Severity, Description
+
+// Linux - Time sync service control
+#event_simpleName=ProcessRollup2 event_platform=Lin ImageFileName=*systemctl CommandLine=/i(systemd-timesyncd|ntpd|chronyd) CommandLine=/i(start|stop|enable|disable|restart)
+| eval RuleID="PCI_10.6.3.b_Lin_Service_Control"
+| eval Severity="MEDIUM"
+| eval Platform="Linux"
+| eval Description="Linux time synchronization service state changed"
+| table _time, aid, ComputerName, UserName, ImageFileName, CommandLine, RuleID, Severity, Description
+
+// Linux - Timezone file modifications
+#event_simpleName in(event_simpleName, values=["FileWritten", "FileModified"]) event_platform=Lin (TargetFilename=*/etc/timezone OR TargetFilename=*/etc/localtime)
+| eval RuleID="PCI_10.6.3.b_Lin_Timezone"
+| eval Severity="MEDIUM"
+| eval Platform="Linux"
+| eval Description="Linux timezone configuration file modified"
+| table _time, aid, ComputerName, UserName, event_simpleName, TargetFilename, RuleID, Severity, Description
