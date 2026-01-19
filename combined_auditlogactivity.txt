@@ -9,7 +9,7 @@ OR
 OR  
 // Syslog/logging daemon changes on Linux
 (event_platform=Lin (#event_simpleName=ProcessRollup2 OR #event_simpleName=SyntheticProcessRollup2) 
-  (ImageFileName IN (values=["*rsyslogd", "*syslog-ng", "*systemd-journald", "*auditd"]) 
+  (in(ImageFileName, values=["*rsyslogd", "*syslog-ng", "*systemd-journald", "*auditd"]) 
   OR CommandLine="*auditctl*"))
 OR
 // Windows event log service changes
@@ -17,6 +17,6 @@ OR
   (ServiceName="EventLog" OR ServiceImageFileName="*wevtsvc.dll"))
 OR
 // CrowdStrike sensor logging changes
-#event_simpleName IN (values=["SensorHeartbeat", "AgentOnline", "AgentOffline"])
+in(#event_simpleName, values=["SensorHeartbeat", "AgentOnline", "AgentOffline"])
 
 | table([@timestamp, ComputerName, event_platform, #event_simpleName, UserName, CommandLine, ServiceName, aid])
