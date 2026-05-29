@@ -1,0 +1,49 @@
+// Detect macOS built-in remote access — process and network signals
+// Covers: Screen Sharing, ARD/Remote Management, SSH
+// VERIFY: confirm event.platform field name/value in your tenant first
+
+#event_simpleName in ["ProcessRollup2", "SyntheticProcessRollup2",
+                   "NetworkReceiveAcceptIP4", "NetworkReceiveAcceptIP6"]  // fix: accept not connect
+| event.platform = "Mac"
+
+| case {
+
+    // --- Process-based detection ---
+    #event_simpleName in ["ProcessRollup2", "SyntheticProcessRollup2"]
+    | ImageFileName = /screensharingd$|ARDAgent$|RemoteManagementAgent$|sshd$/  // fix: removed sshd-keygen-wrapper
+    | remoteVector := case {
+        ImageFileName = /screensharingd/            | "Screen Sharing" ;             // fix: direct assignment
+        ImageFileName = /ARDAgent|RemoteManagement/ | "Remote Management (ARD)" ;
+        ImageFileName = /sshd/                     | "Remote Login (SSH)" ;
+        *                                           | "Unknown" ;
+    }
+    | srcIP := "" ;                                                         // fix: set empty so groupBy doesn't fragment
+
+    // --- Network-based detection (inbound accepted connections) ---
+    #event_simpleName in ["NetworkReceiveAcceptIP4", "NetworkReceiveAcceptIP6"]
+    | LocalPort in [5900, 3283, 22]                                          // LocalPort = service port on accept side
+    | RemoteIP != "127.0.0.1"
+    | RemoteIP != "::1"
+    | remoteVector := case {
+        LocalPort = 5900 | "Screen Sharing / VNC" ;
+        LocalPort = 3283 | "Remote Management (ARD)" ;
+        LocalPort = 22   | "Remote Login (SSH)" ;
+        *              | "Unknown" ;                                          // fix: added wildcard fallback
+    }
+    | srcIP := RemoteIP ;                                                     // fix: only assigned in network branch
+
+}
+
+// Normalize key fields
+| detectionSource := #event_simpleName
+| endpoint        := ComputerName
+| user            := UserName
+
+// Roll up by endpoint + user + vector
+// srcIP collected as a list — one row per endpoint/user/vector regardless of source IP count
+| groupBy([endpoint, user, remoteVector],
+          function=[count(as=eventCount),
+                    collect(srcIP, limit=20, as=sourceIPs),            // fix: collect IPs, don't group by them
+                    min(@timestamp, as=firstSeen),
+                    max(@timestamp, as=lastSeen)])
+| sort(eventCount, order=desc)
